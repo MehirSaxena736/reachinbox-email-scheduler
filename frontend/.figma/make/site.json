@@ -1,0 +1,10 @@
+{
+  "description": "Manage and automate cold email outreach with campaign creation, sequencing, scheduling, and detailed analytics to boost sales engagement efficiently.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

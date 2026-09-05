@@ -1,0 +1,316 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum WorkspaceMemberRole {
+  OWNER
+  MEMBER
+}
+
+enum EmailAccountProvider {
+  GOOGLE
+  ETHEREAL
+  SMTP
+}
+
+enum EmailAccountStatus {
+  ACTIVE
+  PAUSED
+  ERROR
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum CampaignEnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  PAUSED
+  UNSUBSCRIBED
+  FAILED
+}
+
+enum ScheduledEmailStatus {
+  PENDING
+  QUEUED
+  SENT
+  FAILED
+  CANCELLED
+  SKIPPED
+}
+
+enum EmailEventType {
+  SENT
+  DELIVERED
+  OPENED
+  CLICKED
+  BOUNCED
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// Auth & workspace
+// ---------------------------------------------------------------------------
+
+model User {
+  id        String  @id @default(cuid())
+  email     String  @unique
+  passwordHash String?
+  name      String?
+  avatarUrl String?
+  googleId  String? @unique
+
+  slackUserId      String?
+  slackAccessToken String?
+  slackTeamId      String?
+  slackTeamName    String?
+
+  ownedWorkspaces Workspace[]       @relation("WorkspaceOwner")
+  memberships     WorkspaceMember[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Workspace {
+  id      String @id @default(cuid())
+  name    String
+  ownerId String
+  owner   User   @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+
+  members         WorkspaceMember[]
+  emailAccounts   EmailAccount[]
+  contacts        Contact[]
+  campaigns       Campaign[]
+  scheduledEmails ScheduledEmail[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String              @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceMemberRole @default(MEMBER)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@map("workspace_members")
+}
+
+// ---------------------------------------------------------------------------
+// Sending accounts & recipients
+// ---------------------------------------------------------------------------
+
+model EmailAccount {
+  id          String               @id @default(cuid())
+  workspaceId String
+  email       String
+  displayName String?
+  provider    EmailAccountProvider
+  status      EmailAccountStatus   @default(ACTIVE)
+
+  googleRefreshToken String?
+  smtpHost           String?
+  smtpPort           Int?
+  smtpUser           String?
+  smtpPass           String?
+
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaigns       Campaign[]
+  scheduledEmails ScheduledEmail[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId, status])
+  @@map("email_accounts")
+}
+
+model Contact {
+  id          String  @id @default(cuid())
+  workspaceId String
+  email       String
+  firstName   String?
+  lastName    String?
+  company     String?
+  title       String?
+
+  workspace       Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  enrollments     CampaignEnrollment[]
+  scheduledEmails ScheduledEmail[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId])
+  @@map("contacts")
+}
+
+// ---------------------------------------------------------------------------
+// Campaigns & sequences
+// ---------------------------------------------------------------------------
+
+model Campaign {
+  id               String         @id @default(cuid())
+  workspaceId      String
+  emailAccountId   String
+  name             String
+  description      String?
+  status           CampaignStatus @default(DRAFT)
+  timezone         String         @default("UTC")
+  scheduledStartAt DateTime?
+
+  workspace       Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  emailAccount    EmailAccount         @relation(fields: [emailAccountId], references: [id], onDelete: Restrict)
+  sequence        Sequence?
+  enrollments     CampaignEnrollment[]
+  scheduledEmails ScheduledEmail[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([workspaceId, status])
+  @@index([emailAccountId])
+  @@map("campaigns")
+}
+
+model Sequence {
+  id         String @id @default(cuid())
+  campaignId String @unique
+
+  campaign Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  steps    SequenceStep[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("sequences")
+}
+
+model SequenceStep {
+  id         String  @id @default(cuid())
+  sequenceId String
+  stepNumber Int
+  delayMs    Int     @default(0)
+  subject    String
+  bodyHtml   String
+  bodyText   String?
+
+  sequence        Sequence         @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  scheduledEmails ScheduledEmail[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([sequenceId, stepNumber])
+  @@index([sequenceId])
+  @@map("sequence_steps")
+}
+
+model CampaignEnrollment {
+  id                String                   @id @default(cuid())
+  campaignId        String
+  contactId         String
+  status            CampaignEnrollmentStatus @default(ACTIVE)
+  currentStepNumber Int                      @default(0)
+  enrolledAt        DateTime                 @default(now())
+  completedAt       DateTime?
+
+  campaign        Campaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact         Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  scheduledEmails ScheduledEmail[]
+
+  @@unique([campaignId, contactId])
+  @@index([campaignId, status])
+  @@index([contactId])
+  @@map("campaign_enrollments")
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled sends & tracking events
+// ---------------------------------------------------------------------------
+
+model ScheduledEmail {
+  id                   String               @id @default(cuid())
+  workspaceId          String
+  campaignId           String
+  contactId            String
+  campaignEnrollmentId String
+  sequenceStepId       String
+  emailAccountId       String
+  status               ScheduledEmailStatus @default(PENDING)
+  scheduledAt          DateTime
+  sentAt               DateTime?
+  failedAt             DateTime?
+  failureReason        String?
+  bullmqJobId          String?              @unique
+  messageId            String?
+  subject              String
+  bodyHtml             String
+  bodyText             String?
+
+  campaign           Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact            Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  campaignEnrollment CampaignEnrollment @relation(fields: [campaignEnrollmentId], references: [id], onDelete: Cascade)
+  sequenceStep       SequenceStep       @relation(fields: [sequenceStepId], references: [id], onDelete: Restrict)
+  emailAccount       EmailAccount       @relation(fields: [emailAccountId], references: [id], onDelete: Restrict)
+  workspace          Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  events             EmailEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([campaignEnrollmentId, sequenceStepId])
+  @@index([status, scheduledAt])
+  @@index([campaignId, status])
+  @@index([contactId])
+  @@index([emailAccountId, status])
+  @@index([workspaceId, scheduledAt])
+  @@map("scheduled_emails")
+}
+
+model EmailEvent {
+  id               String         @id @default(cuid())
+  scheduledEmailId String
+  type             EmailEventType
+  metadata         Json?
+  occurredAt       DateTime       @default(now())
+
+  scheduledEmail ScheduledEmail @relation(fields: [scheduledEmailId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([scheduledEmailId, type])
+  @@index([occurredAt])
+  @@index([type, occurredAt])
+  @@map("email_events")
+}
