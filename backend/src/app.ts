@@ -19,10 +19,13 @@ export function createApp(): Application {
 
   // Allow frontend (Vite) to communicate with backend
   app.use(
-    cors({
-      origin: "http://localhost:8443",
-      credentials: true,
-    })
+  cors({
+  origin: [
+    "http://localhost:8443",
+    process.env.FRONTEND_URL || "https://reachinbox-frontend-etfe.onrender.com",
+  ],
+  credentials: true,
+})
   );
 
   // Parse JSON request bodies
